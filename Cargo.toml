@@ -1,0 +1,4 @@
+[package]
+name = "webproxy"
+version = "0.1.0"
+authors = ["chris <code@chrisoneill.co.uk>"]
