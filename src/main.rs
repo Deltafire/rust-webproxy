@@ -1,42 +1,36 @@
 // Simple web proxy
 use std::net::{TcpListener, TcpStream, Shutdown};
 use std::thread;
-use std::io::{BufReader, Read, Write, BufRead};
+use std::io::{copy, BufReader, Write, BufRead};
 //use std::io::prelude::*;
 
-fn stream_copy<A: BufRead, B: Write> (mut source: A, mut destination: B) {
-    let mut buffer = [0; 1024];
-    loop {
-        println!("Entering loop..");
-        let bytes_read = source.read(&mut buffer[..]).unwrap();
-        destination.write(&buffer[0..bytes_read]).unwrap();
-    }
-//    for line in source.lines() {
-//        destination.write(line.unwrap().as_bytes()).unwrap();
-//    }
-}
-
-fn handle_client(stream: TcpStream) {
+fn handle_client(mut source: TcpStream) {
     // Read & parse GET request
-    println!("Client connected: {}", stream.peer_addr().unwrap());
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    println!("Client connected: {}", source.peer_addr().unwrap());
+    let mut source_clone = source.try_clone().unwrap();
     let mut connect_string = String::new();
-    let bytes_read = reader.read_line(&mut connect_string).unwrap();
-    println!("Read {} bytes:\n{}\n", bytes_read, &connect_string);
+    {
+        let source = source.try_clone().unwrap();
+        let mut reader = BufReader::new(source);
+        let bytes_read = reader.read_line(&mut connect_string).unwrap();
+        println!("Read {} bytes:\n{}\n", bytes_read, &connect_string);
+    }
     let host = parse_connect(&connect_string).unwrap();
 
     // Connect to remote server
-    let mut dest_stream = TcpStream::connect(&host).unwrap();
-    let _ = dest_stream.write(&connect_string.as_bytes()).unwrap();
+    let mut dest = TcpStream::connect(&host).unwrap();
+    let mut dest_clone = dest.try_clone().unwrap();
 
-    let dest_reader = BufReader::new(dest_stream.try_clone().unwrap());
-    thread::spawn(move||stream_copy(dest_reader, &stream));
-    stream_copy(reader, &dest_stream);
+    let _ = dest.write(&connect_string.as_bytes()).unwrap();
 
-    println!("Client disconnecting: {}", dest_stream.peer_addr().unwrap());
+    thread::spawn(move|| {
+        let _ = copy(&mut dest_clone, &mut source_clone);
+        let _ = source_clone.shutdown(Shutdown::Both);
+        });
+    let _ = copy(&mut source, &mut dest);
 
-    let _ = dest_stream.shutdown(Shutdown::Both);
-
+    println!("Client disconnecting: {}", dest.peer_addr().unwrap());
+    let _ = dest.shutdown(Shutdown::Both);
 }
 
 fn parse_connect(connect_string: &String) -> Result<&str, String> {
