@@ -9,7 +9,7 @@ use std::io::{self, BufRead, BufReader, copy, Write};
 
 fn handle_client(source: TcpStream) -> Result<(), io::Error> {
     let peer_addr = try!(source.peer_addr());
-    info!("Client connected: {}", peer_addr);
+    info!("Connect: {}", peer_addr);
     let mut source_clone = try!(source.try_clone());
 
     // Read & parse GET request
@@ -17,7 +17,9 @@ fn handle_client(source: TcpStream) -> Result<(), io::Error> {
     let mut line = String::new();
     try!(reader.read_line(&mut line));
     let args = line.split_whitespace().collect::<Vec<_>>();
-    if args.len() < 2 { return Ok(())}
+    if args.len() < 2 {
+        warn!("Parse fail: {} \"{}\"", peer_addr, line);
+        return Ok(())}
     let command = args[0].to_uppercase();
     let host = match command.as_ref() {
         "CONNECT" => args[1],
@@ -29,7 +31,7 @@ fn handle_client(source: TcpStream) -> Result<(), io::Error> {
         Some(_) => host,
         None => host + ":80",
     };
-    info!("Destination: {}", host_port);
+    info!("Connect: {} -> {}", peer_addr, host_port);
 
     // Connect to remote server
     let mut dest = try!(TcpStream::connect(&host_port as &str));
@@ -51,30 +53,48 @@ fn handle_client(source: TcpStream) -> Result<(), io::Error> {
         let ret = copy(&mut dest_clone, &mut source_clone);
         let _ = source_clone.shutdown(Shutdown::Both);
         ret.unwrap_or(0)
-        });
+    });
     let bytes_up = copy(&mut reader, &mut dest).unwrap_or(0);
     let _ = dest.shutdown(Shutdown::Both);
     let bytes_down = child.join().unwrap_or(0);
 
-    info!("Client disconnected: {} ({} UP, {} DOWN)",
-          peer_addr, bytes_up, bytes_down);
+    // We lose the byte count if the connection is terminated abnormally
+    if bytes_up + bytes_down > 0 {
+        info!("Disconnect: {} - {} ({} UP, {} DOWN)",
+              peer_addr, host_port, bytes_up, bytes_down);
+    } else {
+        info!("Reset: {} - {}", peer_addr, host_port);
+    }
+
     Ok(())
+}
+
+
+fn err_exit(err_msg: &str) -> ! {
+    writeln!(io::stderr(), "{}", err_msg).unwrap();
+    writeln!(io::stderr(), "Usage: webproxy <bind_ip:port>").unwrap();
+    std::process::exit(1);
 }
 
 fn main() {
     env_logger::init().unwrap();
 
     info!("Starting up");
-    // Config
-    const BIND_ADDR: &'static str = "127.0.0.1:1234";
+    let args = std::env::args().collect::<Vec<String>>();
+    if args.len() < 2 { err_exit("Insufficient parameters")}
+    let bind_addr: &str = args[1].as_ref();
 
-    let listener = TcpListener::bind(&BIND_ADDR).unwrap();
+    let listener = match TcpListener::bind(bind_addr) {
+        Ok(a) => a,
+        Err(_) => err_exit("Unable to bind to requested host:port"),
+    };
+    info!("Listener bound to {}", bind_addr);
 
     // Accept & process incoming connections
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => { thread::spawn(move||handle_client(stream)); }
-            Err(e) => { println!("Connection failed: {:?}", e) }
+            Err(e) => { warn!("Connection failed: {:?}", e) }
         }
     }
 }
