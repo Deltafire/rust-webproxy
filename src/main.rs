@@ -4,8 +4,32 @@ extern crate log;
 extern crate env_logger;
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::thread;
-use std::io::{self, BufRead, BufReader, copy, Write};
-//use std::io::prelude::*;
+use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
+
+struct CopyError {
+    bytes_read: u64,
+    error: io::Error,
+}
+
+struct CopyError (());
+
+// Modified version of io::copy() that returns bytes read on error
+fn copy<R: ?Sized, W: ?Sized>(reader: &mut R, writer: &mut W) -> io::Result<u64>
+    where R: Read, W: Write
+{
+    let mut buf = [0; std::io::DEFAULT_BUF_SIZE];
+    let mut written = 0;
+    loop {
+        let len = match reader.read(&mut buf) {
+            Ok(0) => return Ok(written),
+            Ok(len) => len,
+            Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => return Err(CopyError { bytes_read: written, error: e}),
+        };
+        try!(writer.write_all(&buf[..len]));
+        written += len as u64;
+    }
+}
 
 fn handle_client(source: TcpStream) -> Result<(), io::Error> {
     let peer_addr = try!(source.peer_addr());
@@ -23,7 +47,7 @@ fn handle_client(source: TcpStream) -> Result<(), io::Error> {
     let command = args[0].to_uppercase();
     let host = match command.as_ref() {
         "CONNECT" => args[1],
-        // Most likely a get or post request, remove http://
+        // Most likely a get or post request, strip protocol prefix
         _ => { let sub_args = args[1].split('/').collect::<Vec<_>>();
                if sub_args.len() >= 3 { sub_args[2]} else { args[1] }}
     }.to_string();

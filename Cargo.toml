@@ -1,7 +1,10 @@
 [package]
 name = "webproxy"
 version = "0.1.0"
-authors = ["chris <code@chrisoneill.co.uk>"]
+authors = ["Christopher O'Neill <code@chrisoneill.co.uk>"]
+description = "A simple web proxy"
+keywords = ["webproxy", "proxy"]
+# license = ""
 
 [dependencies]
 log = "*"
