@@ -4,34 +4,9 @@ extern crate log;
 extern crate env_logger;
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::thread;
-use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
+use std::io::{self, BufRead, BufReader, Write, copy};
 
-struct CopyError {
-    bytes_read: u64,
-    error: io::Error,
-}
-
-struct CopyError (());
-
-// Modified version of io::copy() that returns bytes read on error
-fn copy<R: ?Sized, W: ?Sized>(reader: &mut R, writer: &mut W) -> io::Result<u64>
-    where R: Read, W: Write
-{
-    let mut buf = [0; std::io::DEFAULT_BUF_SIZE];
-    let mut written = 0;
-    loop {
-        let len = match reader.read(&mut buf) {
-            Ok(0) => return Ok(written),
-            Ok(len) => len,
-            Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
-            Err(e) => return Err(CopyError { bytes_read: written, error: e}),
-        };
-        try!(writer.write_all(&buf[..len]));
-        written += len as u64;
-    }
-}
-
-fn handle_client(source: TcpStream) -> Result<(), io::Error> {
+fn handle_client(source: TcpStream) -> io::Result<()> {
     let peer_addr = try!(source.peer_addr());
     info!("Connect: {}", peer_addr);
     let mut source_clone = try!(source.try_clone());
@@ -101,7 +76,7 @@ fn err_exit(err_msg: &str) -> ! {
 }
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
 
     info!("Starting up");
     let args = std::env::args().collect::<Vec<String>>();
